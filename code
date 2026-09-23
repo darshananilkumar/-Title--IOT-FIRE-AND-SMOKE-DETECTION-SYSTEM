@@ -1,0 +1,202 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+
+// =====================================================
+// IoT Fire and Smoke Detection System
+// ESP32 + MQ-2 + Potentiometer + LEDs + Buzzer
+// ThingSpeak Cloud
+// =====================================================
+
+// ---------------- Wi-Fi ----------------
+const char* ssid = "Wokwi-GUEST";
+const char* password = "";
+
+// ---------------- ThingSpeak ----------------
+// Replace these with YOUR values
+const unsigned long CHANNEL_ID = 3504717;
+const char* WRITE_API_KEY = "KZN4TUBSANP5J4AH";
+
+const char* server = "http://api.thingspeak.com/update";
+
+// ---------------- Pin Connections ----------------
+const int smokePin = 34;       // MQ-2 AOUT
+const int flamePin = 35;       // Potentiometer SIG
+
+const int greenLED = 26;
+const int redLED = 25;
+const int buzzer = 14;
+
+// ---------------- Detection Thresholds ----------------
+const int smokeThreshold = 2000;
+const int flameThreshold = 2500;
+
+// Send data every 15 seconds
+unsigned long lastSendTime = 0;
+const unsigned long sendInterval = 15000;
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup() {
+
+  Serial.begin(115200);
+
+  // Sensor pins
+  pinMode(smokePin, INPUT);
+  pinMode(flamePin, INPUT);
+
+  // Output pins
+  pinMode(greenLED, OUTPUT);
+  pinMode(redLED, OUTPUT);
+  pinMode(buzzer, OUTPUT);
+
+  // Initial condition
+  digitalWrite(greenLED, HIGH);
+  digitalWrite(redLED, LOW);
+  digitalWrite(buzzer, LOW);
+
+  // ---------------- Wi-Fi Connection ----------------
+  Serial.println();
+  Serial.println("================================");
+  Serial.println(" IoT FIRE & SMOKE DETECTION");
+  Serial.println("================================");
+
+  Serial.println("Connecting to Wi-Fi...");
+
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.println("Wi-Fi Connected!");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+
+  Serial.println("System Started");
+  Serial.println();
+}
+
+// =====================================================
+// SEND DATA TO THINGSPEAK
+// =====================================================
+
+void sendToThingSpeak(int smokeValue, int flameValue, int alertStatus) {
+
+  if (WiFi.status() == WL_CONNECTED) {
+
+    HTTPClient http;
+
+    String url = String(server) +
+                 "?api_key=" + WRITE_API_KEY +
+                 "&field1=" + String(smokeValue) +
+                 "&field2=" + String(flameValue) +
+                 "&field3=" + String(alertStatus);
+
+    Serial.println("Sending data to ThingSpeak...");
+
+    http.begin(url);
+
+    int httpResponseCode = http.GET();
+
+    if (httpResponseCode > 0) {
+
+      Serial.print("ThingSpeak Response: ");
+      Serial.println(httpResponseCode);
+
+      if (httpResponseCode == 200) {
+        Serial.println("Data successfully sent!");
+      }
+
+    } else {
+
+      Serial.print("Error sending data: ");
+      Serial.println(http.errorToString(httpResponseCode));
+    }
+
+    http.end();
+
+  } else {
+
+    Serial.println("Wi-Fi disconnected!");
+  }
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop() {
+
+  // Read sensors
+  int smokeValue = analogRead(smokePin);
+  int flameValue = analogRead(flamePin);
+
+  // Check conditions
+  bool smokeDetected = smokeValue > smokeThreshold;
+  bool flameDetected = flameValue > flameThreshold;
+
+  int alertStatus = 0;
+
+  // =================================================
+  // FIRE / SMOKE DETECTED
+  // =================================================
+
+  if (smokeDetected || flameDetected) {
+
+    alertStatus = 1;
+
+    digitalWrite(greenLED, LOW);
+    digitalWrite(redLED, HIGH);
+    digitalWrite(buzzer, HIGH);
+
+    Serial.println("!!! FIRE/SMOKE DETECTED !!!");
+  }
+
+  // =================================================
+  // NORMAL CONDITION
+  // =================================================
+
+  else {
+
+    alertStatus = 0;
+
+    digitalWrite(greenLED, HIGH);
+    digitalWrite(redLED, LOW);
+    digitalWrite(buzzer, LOW);
+
+    Serial.println("Status: NORMAL");
+  }
+
+  // Display sensor values
+  Serial.print("Smoke Value: ");
+  Serial.print(smokeValue);
+
+  Serial.print(" | Flame Simulation: ");
+  Serial.println(flameValue);
+
+  Serial.print("Alert Status: ");
+  Serial.println(alertStatus);
+
+  Serial.println("-------------------------------");
+
+  // =================================================
+  // SEND TO THINGSPEAK EVERY 15 SECONDS
+  // =================================================
+
+  if (millis() - lastSendTime >= sendInterval) {
+
+    lastSendTime = millis();
+
+    sendToThingSpeak(
+      smokeValue,
+      flameValue,
+      alertStatus
+    );
+  }
+
+  delay(1000);
+}
